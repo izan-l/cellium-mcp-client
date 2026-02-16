@@ -1,10 +1,10 @@
 # @cellium/mcp-client
 
-A Model Context Protocol (MCP) client for connecting to the remote Cellium processor server via Server-Sent Events (SSE).
+A Model Context Protocol (MCP) server that proxies requests to remote Cellium processor servers.
 
 ## Features
 
-- **SSE Transport**: Connects to remote Cellium server using Server-Sent Events
+- **HTTP Proxy**: Proxies MCP requests to remote Cellium servers via HTTP
 - **Authentication**: Token-based authentication with format `user:username:hash`
 - **Robust Connection Management**: Automatic reconnection with configurable retry logic
 - **MCP Protocol Compliance**: Uses official `@modelcontextprotocol/sdk`
@@ -38,7 +38,7 @@ cellium-mcp-client --token "user:your-username:your-hash"
 # With custom endpoint and verbose logging
 cellium-mcp-client \
   --token "user:your-username:your-hash" \
-  --endpoint "https://mcp.cellium.dev/sse" \
+  --endpoint "https://mcp.cellium.dev/mcp" \
   --verbose \
   --retry-attempts 5 \
   --retry-delay 2000
@@ -66,7 +66,7 @@ const logger = pino();
 
 const client = new CelliumMCPClient({
   token: 'user:your-username:your-hash',
-  endpoint: 'https://mcp.cellium.dev/sse',
+  endpoint: 'https://mcp.cellium.dev/mcp',
   logger,
   retryAttempts: 3,
   retryDelay: 1000
@@ -87,7 +87,7 @@ process.on('SIGINT', async () => {
 | Option | Environment Variable | Description | Default |
 |--------|---------------------|-------------|---------|
 | `--token` | `CELLIUM_MCP_TOKEN` | Authentication token (required) | - |
-| `--endpoint` | - | Server endpoint URL | `https://mcp.cellium.dev/sse` |
+| `--endpoint` | - | Server endpoint URL | `https://mcp.cellium.dev/mcp` |
 | `--verbose` | - | Enable verbose logging | `false` |
 | `--retry-attempts` | - | Number of retry attempts | `3` |
 | `--retry-delay` | - | Delay between retries (ms) | `1000` |
@@ -106,29 +106,20 @@ Example: `user:john-doe:a1b2c3d4e5f6...`
 ## Architecture
 
 ```
-┌─────────────────┐    SSE     ┌─────────────────┐
-│                 │◄──────────►│                 │
-│   MCP Client    │   HTTPS    │ Cellium Server  │
-│  (This Package) │            │   (Remote)      │
-│                 │            │                 │
-└─────────────────┘            └─────────────────┘
-         ▲                               │
-         │ stdio                        │
-         │ MCP Protocol                 │
-         ▼                               │
-┌─────────────────┐                     │
-│                 │                     │
-│  Code Editor /  │                     │
-│  AI Assistant   │                     │
-│   (Cody, etc.)  │                     │
-└─────────────────┘                     │
+┌─────────────────┐   stdio    ┌─────────────────┐   HTTPS    ┌─────────────────┐
+│                 │◄──────────►│                 │◄──────────►│                 │
+│  Code Editor /  │    MCP     │ cellium-mcp-    │    HTTP    │ Cellium Server  │
+│  AI Assistant   │  Protocol  │ client (Proxy)  │   Requests │   (Remote)      │
+│   (Cody, etc.)  │            │                 │            │                 │
+└─────────────────┘            └─────────────────┘            └─────────────────┘
 ```
 
-The client acts as a bridge between local MCP clients (like Cody) and the remote Cellium processor server, handling:
-- Authentication and connection management
-- Protocol translation between stdio MCP and SSE
-- Error handling and reconnection logic
-- Request/response proxying
+The client acts as an **MCP server proxy** between local MCP clients (like Cody) and the remote Cellium processor server, handling:
+- **MCP Protocol**: Full stdio-based MCP server implementation
+- **Authentication**: Token-based authentication with remote server
+- **Request Proxying**: Converts MCP requests to HTTP requests to remote server
+- **Error Handling**: Graceful handling of connection failures
+- **Connection Management**: Automatic retry and reconnection logic
 
 ## Development
 
@@ -153,7 +144,7 @@ npm run dev
 ### Connection Issues
 
 1. **Invalid token format**: Ensure your token follows the `user:username:hash` format
-2. **Network connectivity**: Check if `https://mcp.cellium.dev/sse` is accessible
+2. **Network connectivity**: Check if `https://mcp.cellium.dev/mcp` is accessible
 3. **Authentication failed**: Verify your token is valid and not expired
 
 ### Verbose Logging

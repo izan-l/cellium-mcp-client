@@ -47,7 +47,6 @@ export class CelliumMCPClient {
   private localServer: McpServer;
   private isConnected = false;
   private reconnectTimer?: NodeJS.Timeout;
-  private currentRetryCount = 0;
 
   constructor(config: CelliumMCPClientConfig) {
     this.config = {
@@ -82,20 +81,12 @@ export class CelliumMCPClient {
     // Override the underlying server's tool request handlers to proxy to remote
     this.localServer.server.setRequestHandler(ToolsListSchema, async () => {
       this.config.logger.debug('Proxying tools/list to remote server');
-      if (!this.isConnected) {
-        throw new Error('Not connected to remote server');
-      }
-      
       const result = await this.makeHttpRequest('tools/list', {});
       return result;
     });
 
     this.localServer.server.setRequestHandler(ToolsCallSchema, async (request) => {
       this.config.logger.debug({ toolName: request.params?.name }, 'Proxying tool call to remote server');
-      if (!this.isConnected) {
-        throw new Error('Not connected to remote server');
-      }
-      
       const result = await this.makeHttpRequest('tools/call', request.params);
       return result;
     });
@@ -103,35 +94,36 @@ export class CelliumMCPClient {
     // Handle resources as well
     this.localServer.server.setRequestHandler(ResourcesListSchema, async () => {
       this.config.logger.debug('Proxying resources/list to remote server');
-      if (!this.isConnected) {
-        throw new Error('Not connected to remote server');
-      }
-      
       const result = await this.makeHttpRequest('resources/list', {});
       return result;
     });
 
     this.localServer.server.setRequestHandler(ResourcesReadSchema, async (request) => {
       this.config.logger.debug({ uri: request.params?.uri }, 'Proxying resources/read to remote server');
-      if (!this.isConnected) {
-        throw new Error('Not connected to remote server');
-      }
-      
       const result = await this.makeHttpRequest('resources/read', request.params);
       return result;
     });
 
     // Handle ping
     this.localServer.server.setRequestHandler(PingSchema, async () => {
-      if (!this.isConnected) {
-        throw new Error('Not connected to remote server');
-      }
       const result = await this.makeHttpRequest('ping', {});
       return result;
     });
   }
 
   private async makeHttpRequest(method: string, params: any): Promise<any> {
+    // If not connected, try to connect first
+    if (!this.isConnected) {
+      try {
+        await this.testConnection();
+        this.isConnected = true;
+        this.config.logger.info('Connected to remote Cellium server');
+      } catch (error) {
+        this.config.logger.error({ error }, 'Failed to connect to remote server');
+        throw new Error('Cannot connect to remote Cellium server');
+      }
+    }
+
     const mcpEndpoint = this.config.endpoint.replace('/sse', '/mcp');
     
     const requestBody = {
@@ -167,38 +159,43 @@ export class CelliumMCPClient {
       
     } catch (error) {
       this.config.logger.error({ error, method }, 'HTTP request to remote server failed');
+      this.isConnected = false; // Mark as disconnected on error
       throw error;
     }
   }
 
   async connect(): Promise<void> {
     try {
-      this.config.logger.info({ endpoint: this.config.endpoint }, 'Connecting to Cellium MCP Server');
+      this.config.logger.info({ endpoint: this.config.endpoint }, 'Starting Cellium MCP Server');
 
-      // Test connection with a ping
-      await this.testConnection();
+      // Set up the stdio transport for local MCP server immediately
+      const stdioTransport = new StdioServerTransport();
+      await this.localServer.connect(stdioTransport);
       
+      this.config.logger.info('MCP Server connected and ready');
+
+      // Test connection to remote server in background, but don't block startup
+      this.testConnectionInBackground();
+
+    } catch (error) {
+      this.config.logger.error({ error }, 'Failed to start MCP server');
+      throw error;
+    }
+  }
+
+  private async testConnectionInBackground(): Promise<void> {
+    try {
+      await this.testConnection();
       this.isConnected = true;
-      this.currentRetryCount = 0;
+      this.config.logger.info('Connected to remote Cellium server');
       
       if (this.reconnectTimer) {
         clearTimeout(this.reconnectTimer);
         this.reconnectTimer = undefined;
       }
-
-      this.config.logger.info('Connected to remote Cellium server');
-
-      // Set up the stdio transport for local MCP server
-      const stdioTransport = new StdioServerTransport();
-      await this.localServer.connect(stdioTransport);
-      
-      this.config.logger.info('MCP Client connected and ready');
-
     } catch (error) {
-      this.config.logger.error({ error }, 'Failed to connect');
+      this.config.logger.warn({ error }, 'Failed to connect to remote server, will retry on first request');
       this.isConnected = false;
-      this.handleConnectionError();
-      throw error;
     }
   }
 
@@ -239,28 +236,9 @@ export class CelliumMCPClient {
     this.config.logger.debug('Connection test successful');
   }
 
-  private handleConnectionError(): void {
-    if (this.currentRetryCount < this.config.retryAttempts) {
-      this.currentRetryCount++;
-      this.config.logger.warn(`Connection failed, retrying in ${this.config.retryDelay}ms (attempt ${this.currentRetryCount}/${this.config.retryAttempts})`);
-      
-      this.reconnectTimer = setTimeout(() => {
-        this.reconnect();
-      }, this.config.retryDelay);
-    } else {
-      this.config.logger.error('Max retry attempts reached, giving up');
-      process.exit(1);
-    }
-  }
 
-  private async reconnect(): Promise<void> {
-    try {
-      await this.connect();
-    } catch (error) {
-      this.config.logger.error({ error }, 'Reconnection failed');
-      this.handleConnectionError();
-    }
-  }
+
+
 
   async disconnect(): Promise<void> {
     this.config.logger.info('Disconnecting from Cellium MCP Server');

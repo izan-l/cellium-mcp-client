@@ -84,6 +84,11 @@ export class CelliumMCPClient {
   };
   private activeRequests: Map<string, RequestTiming> = new Map();
   private mcpProtocolVersion = '2024-11-05';
+  
+  // Tools caching to avoid 655ms remote calls during MCP handshake
+  private toolsCache: any[] = [];
+  private toolsCacheTime = 0;
+  private backgroundRefreshTimer?: NodeJS.Timeout;
 
   constructor(config: CelliumMCPClientConfig) {
     this.config = {
@@ -282,13 +287,36 @@ export class CelliumMCPClient {
     this.localServer.server.setRequestHandler(ToolsListSchema, withErrorBoundary(async (request) => {
       this.logDebug('Processing tools/list request', request);
       
-      // Add artificial delay to test timing issues
-      if (this.config.debugMode) {
-        await new Promise(resolve => setTimeout(resolve, 100));
+      // Return cached tools instantly if cache is fresh (<5 minutes)
+      const now = Date.now();
+      const cacheAge = now - this.toolsCacheTime;
+      const cacheMaxAge = 5 * 60 * 1000; // 5 minutes
+      
+      if (this.toolsCache.length > 0 && cacheAge < cacheMaxAge) {
+        this.logDebug('Returning cached tools list', { 
+          toolCount: this.toolsCache.length, 
+          cacheAge: Math.round(cacheAge / 1000) + 's' 
+        });
+        return { tools: this.toolsCache };
       }
       
+      // Cache miss or expired - fetch from remote
+      this.logDebug('Cache miss or expired, fetching tools from remote', { 
+        cacheAge: Math.round(cacheAge / 1000) + 's',
+        hasCache: this.toolsCache.length > 0
+      });
+      
       const result = await this.makeHttpRequest('tools/list', {});
-      this.logDebug('tools/list completed successfully', { toolCount: result.tools?.length || 0 });
+      
+      // Update cache
+      if (result.tools) {
+        this.toolsCache = result.tools;
+        this.toolsCacheTime = now;
+        this.logDebug('Tools cache updated', { 
+          toolCount: this.toolsCache.length 
+        });
+      }
+      
       return result;
     }, 'tools/list'));
 
@@ -543,8 +571,8 @@ export class CelliumMCPClient {
 
       this.config.logger.debug('Keep-alive interval started for persistent MCP communication');
 
-      // Test connection to remote server in background, but don't block startup
-      this.testConnectionInBackground();
+      // Test connection to remote server and pre-fetch tools cache
+      await this.initializeRemoteConnection();
 
     } catch (error) {
       this.config.logger.error({
@@ -590,25 +618,6 @@ export class CelliumMCPClient {
       }
     } catch (error) {
       this.logDebug('Could not attach transport event listeners', { error });
-    }
-  }
-
-  private async testConnectionInBackground(): Promise<void> {
-    try {
-      this.logDebug('Testing connection to remote server in background');
-      await this.testConnection();
-      this.isConnected = true;
-      this.config.logger.info('Connected to remote Cellium server');
-      
-      if (this.reconnectTimer) {
-        clearTimeout(this.reconnectTimer);
-        this.reconnectTimer = undefined;
-      }
-    } catch (error) {
-      this.config.logger.warn({
-        error: error instanceof Error ? error.message : error
-      }, 'Failed to connect to remote server, will retry on first request');
-      this.isConnected = false;
     }
   }
 
@@ -688,6 +697,72 @@ export class CelliumMCPClient {
     this.config.logger.debug({ duration }, 'Connection test successful');
   }
 
+  private async initializeRemoteConnection(): Promise<void> {
+    try {
+      this.logDebug('Initializing remote connection and pre-fetching tools');
+      await this.testConnection();
+      this.isConnected = true;
+      
+      // Pre-fetch and cache tools list
+      try {
+        const toolsResult = await this.makeHttpRequest('tools/list', {});
+        if (toolsResult.tools) {
+          this.toolsCache = toolsResult.tools;
+          this.toolsCacheTime = Date.now();
+          this.config.logger.info({
+            toolCount: this.toolsCache.length
+          }, 'Tools list pre-fetched and cached successfully');
+        }
+      } catch (toolsError) {
+        this.config.logger.warn({
+          error: toolsError instanceof Error ? toolsError.message : toolsError
+        }, 'Failed to pre-fetch tools list, will fetch on demand');
+      }
+
+      // Start background refresh timer (every 2 minutes)
+      this.backgroundRefreshTimer = setInterval(() => {
+        this.refreshToolsCache().catch((error) => {
+          this.config.logger.warn({
+            error: error instanceof Error ? error.message : error
+          }, 'Background tools cache refresh failed');
+        });
+      }, 2 * 60 * 1000); // 2 minutes
+
+      this.config.logger.info('Connected to remote Cellium server');
+      
+      if (this.reconnectTimer) {
+        clearTimeout(this.reconnectTimer);
+        this.reconnectTimer = undefined;
+      }
+    } catch (error) {
+      this.config.logger.warn({
+        error: error instanceof Error ? error.message : error
+      }, 'Failed to initialize remote connection, will retry on first request');
+      this.isConnected = false;
+    }
+  }
+
+  private async refreshToolsCache(): Promise<void> {
+    if (!this.isConnected) {
+      return;
+    }
+
+    try {
+      this.logDebug('Background refresh of tools cache');
+      const toolsResult = await this.makeHttpRequest('tools/list', {});
+      if (toolsResult.tools) {
+        this.toolsCache = toolsResult.tools;
+        this.toolsCacheTime = Date.now();
+        this.logDebug('Tools cache refreshed in background', { 
+          toolCount: this.toolsCache.length 
+        });
+      }
+    } catch (error) {
+      this.logDebug('Background tools cache refresh failed', { error });
+      // Don't mark as disconnected for background refresh failures
+    }
+  }
+
 
 
 
@@ -723,6 +798,11 @@ export class CelliumMCPClient {
     if (this.keepAliveInterval) {
       clearInterval(this.keepAliveInterval);
       this.keepAliveInterval = undefined;
+    }
+    
+    if (this.backgroundRefreshTimer) {
+      clearInterval(this.backgroundRefreshTimer);
+      this.backgroundRefreshTimer = undefined;
     }
 
     try {

@@ -78,8 +78,8 @@ async function main() {
 
     await client.connect();
     
-    // Keep the process alive
-    process.stdin.resume();
+    // Start the MCP server and keep process alive for stdio communication
+    await client.serve();
     
   } catch (error) {
     logger.error({ error }, 'Fatal error');

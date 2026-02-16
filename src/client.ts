@@ -202,6 +202,14 @@ export class CelliumMCPClient {
     }
   }
 
+  async serve(): Promise<void> {
+    // The MCP server is already connected via stdio in connect()
+    // This method just keeps the process alive indefinitely
+    return new Promise(() => {
+      // Never resolve - keep process alive for MCP communication
+    });
+  }
+
   private async testConnection(): Promise<void> {
     const mcpEndpoint = this.config.endpoint.replace('/sse', '/mcp');
     

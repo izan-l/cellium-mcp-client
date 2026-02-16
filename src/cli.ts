@@ -9,7 +9,7 @@ const program = new Command();
 program
   .name('cellium-mcp-client')
   .description('MCP client for connecting to remote Cellium processor server')
-  .version('1.1.0')
+  .version('1.1.1')
   .option('-t, --token <token>', 'Authentication token (format: user:username:hash)')
   .option('-e, --endpoint <url>', 'Server endpoint URL', 'http://localhost:3000/mcp')
   .option('-v, --verbose', 'Enable verbose logging')

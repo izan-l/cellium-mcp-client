@@ -42,6 +42,19 @@ const PingSchema = z.object({
   params: z.object({}).optional()
 });
 
+const InitializeSchema = z.object({
+  method: z.literal('initialize'),
+  params: z.object({
+    protocolVersion: z.string(),
+    capabilities: z.object({}).passthrough()
+  })
+});
+
+const InitializedNotificationSchema = z.object({
+  method: z.literal('notifications/initialized'),
+  params: z.object({}).optional()
+});
+
 export class CelliumMCPClient {
   private config: Required<CelliumMCPClientConfig>;
   private localServer: McpServer;
@@ -70,12 +83,20 @@ export class CelliumMCPClient {
   }
 
   private setupServer(): void {
-    // Register a dynamic tool handler that forwards all tool calls to remote server
-    this.localServer.registerTool('cellium-proxy-tool', {
-      description: 'Proxy tool for Cellium server - handles all tool calls dynamically'
-    }, async (_args) => {
-      // This won't actually be called since we override the request handlers directly
-      return { content: [{ type: 'text', text: 'Proxy tool' }] };
+    // Handle MCP initialization
+    this.localServer.server.setRequestHandler(InitializeSchema, async (_request) => {
+      this.config.logger.debug('Received initialize request');
+      return {
+        protocolVersion: '2024-11-05',
+        capabilities: {
+          tools: {},
+          resources: {}
+        },
+        serverInfo: {
+          name: 'cellium-mcp-client',
+          version: '1.1.1'
+        }
+      };
     });
 
     // Override the underlying server's tool request handlers to proxy to remote
@@ -108,6 +129,12 @@ export class CelliumMCPClient {
     this.localServer.server.setRequestHandler(PingSchema, async () => {
       const result = await this.makeHttpRequest('ping', {});
       return result;
+    });
+
+    // Handle other common MCP methods
+    this.localServer.server.setNotificationHandler(InitializedNotificationSchema, async () => {
+      this.config.logger.debug('Received initialized notification');
+      // No response needed for notifications
     });
   }
 

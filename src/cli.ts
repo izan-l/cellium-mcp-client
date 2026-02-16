@@ -11,7 +11,7 @@ program
   .description('MCP client for connecting to remote Cellium processor server')
   .version('1.0.0')
   .option('-t, --token <token>', 'Authentication token (format: user:username:hash)')
-  .option('-e, --endpoint <url>', 'Server endpoint URL', 'https://mcp.cellium.dev/sse')
+  .option('-e, --endpoint <url>', 'Server endpoint URL', 'http://localhost:3000/mcp')
   .option('-v, --verbose', 'Enable verbose logging')
   .option('-r, --retry-attempts <num>', 'Number of retry attempts on connection failure', '3')
   .option('--retry-delay <ms>', 'Delay between retry attempts in milliseconds', '1000')

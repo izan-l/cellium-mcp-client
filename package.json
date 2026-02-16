@@ -1,5 +1,5 @@
 {
-  "name": "@cellium/mcp-client",
+  "name": "cellium-mcp-client",
   "version": "1.0.0",
   "description": "MCP client for connecting to remote Cellium processor server",
   "main": "dist/index.js",

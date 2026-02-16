@@ -60,6 +60,7 @@ export class CelliumMCPClient {
   private localServer: McpServer;
   private isConnected = false;
   private reconnectTimer?: NodeJS.Timeout;
+  private keepAliveInterval?: NodeJS.Timeout;
 
   constructor(config: CelliumMCPClientConfig) {
     this.config = {
@@ -244,6 +245,14 @@ export class CelliumMCPClient {
       
       this.config.logger.info('MCP Server connected and ready');
 
+      // Keep the process alive with a minimal interval
+      // This ensures the process doesn't exit when stdin closes
+      this.keepAliveInterval = setInterval(() => {
+        // Do nothing - just keep the event loop alive
+      }, 30000); // Check every 30 seconds
+
+      this.config.logger.debug('Keep-alive interval started for persistent MCP communication');
+
       // Test connection to remote server in background, but don't block startup
       this.testConnectionInBackground();
 
@@ -271,9 +280,15 @@ export class CelliumMCPClient {
 
   async serve(): Promise<void> {
     // The MCP server is already connected via stdio in connect()
-    // This method just keeps the process alive indefinitely
-    return new Promise(() => {
+    // Keep the process alive indefinitely for persistent MCP communication
+    // This ensures compatibility with MCP clients like Copilot that expect long-running servers
+    this.config.logger.debug('Server is now serving and will stay alive for persistent MCP communication');
+    
+    // Return a promise that never resolves to keep the process alive
+    // The process will only exit via SIGINT/SIGTERM signals
+    return new Promise<void>(() => {
       // Never resolve - keep process alive for MCP communication
+      // Process will be terminated gracefully via signal handlers
     });
   }
 
@@ -318,6 +333,11 @@ export class CelliumMCPClient {
     if (this.reconnectTimer) {
       clearTimeout(this.reconnectTimer);
       this.reconnectTimer = undefined;
+    }
+    
+    if (this.keepAliveInterval) {
+      clearInterval(this.keepAliveInterval);
+      this.keepAliveInterval = undefined;
     }
 
     await this.localServer.close();

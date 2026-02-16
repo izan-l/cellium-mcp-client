@@ -94,41 +94,84 @@ export class CelliumMCPClient {
         },
         serverInfo: {
           name: 'cellium-mcp-client',
-          version: '1.1.1'
+          version: '1.1.2'
         }
       };
     });
 
     // Override the underlying server's tool request handlers to proxy to remote
     this.localServer.server.setRequestHandler(ToolsListSchema, async () => {
-      this.config.logger.debug('Proxying tools/list to remote server');
-      const result = await this.makeHttpRequest('tools/list', {});
-      return result;
+      try {
+        this.config.logger.debug('Proxying tools/list to remote server');
+        const result = await this.makeHttpRequest('tools/list', {});
+        this.config.logger.debug({ result }, 'tools/list result from remote server');
+        return result;
+      } catch (error) {
+        this.config.logger.error({ error }, 'Error proxying tools/list');
+        // Return empty tools list instead of throwing to prevent transport closure
+        return { tools: [] };
+      }
     });
 
     this.localServer.server.setRequestHandler(ToolsCallSchema, async (request) => {
-      this.config.logger.debug({ toolName: request.params?.name }, 'Proxying tool call to remote server');
-      const result = await this.makeHttpRequest('tools/call', request.params);
-      return result;
+      try {
+        this.config.logger.debug({ toolName: request.params?.name }, 'Proxying tool call to remote server');
+        const result = await this.makeHttpRequest('tools/call', request.params);
+        return result;
+      } catch (error) {
+        this.config.logger.error({ error, toolName: request.params?.name }, 'Error proxying tool call');
+        // Return error result instead of throwing
+        return {
+          content: [{
+            type: 'text',
+            text: `Error calling tool: ${error instanceof Error ? error.message : 'Unknown error'}`
+          }],
+          isError: true
+        };
+      }
     });
 
     // Handle resources as well
     this.localServer.server.setRequestHandler(ResourcesListSchema, async () => {
-      this.config.logger.debug('Proxying resources/list to remote server');
-      const result = await this.makeHttpRequest('resources/list', {});
-      return result;
+      try {
+        this.config.logger.debug('Proxying resources/list to remote server');
+        const result = await this.makeHttpRequest('resources/list', {});
+        return result;
+      } catch (error) {
+        this.config.logger.error({ error }, 'Error proxying resources/list');
+        // Return empty resources list instead of throwing
+        return { resources: [] };
+      }
     });
 
     this.localServer.server.setRequestHandler(ResourcesReadSchema, async (request) => {
-      this.config.logger.debug({ uri: request.params?.uri }, 'Proxying resources/read to remote server');
-      const result = await this.makeHttpRequest('resources/read', request.params);
-      return result;
+      try {
+        this.config.logger.debug({ uri: request.params?.uri }, 'Proxying resources/read to remote server');
+        const result = await this.makeHttpRequest('resources/read', request.params);
+        return result;
+      } catch (error) {
+        this.config.logger.error({ error, uri: request.params?.uri }, 'Error proxying resources/read');
+        // Return error result instead of throwing
+        return {
+          contents: [{
+            uri: request.params?.uri || '',
+            mimeType: 'text/plain',
+            text: `Error reading resource: ${error instanceof Error ? error.message : 'Unknown error'}`
+          }]
+        };
+      }
     });
 
     // Handle ping
     this.localServer.server.setRequestHandler(PingSchema, async () => {
-      const result = await this.makeHttpRequest('ping', {});
-      return result;
+      try {
+        const result = await this.makeHttpRequest('ping', {});
+        return result;
+      } catch (error) {
+        this.config.logger.error({ error }, 'Error proxying ping');
+        // Return empty result instead of throwing
+        return {};
+      }
     });
 
     // Handle other common MCP methods

@@ -36,7 +36,8 @@ const logger = pino({
       colorize: true,
       translateTime: 'HH:MM:ss.l',
       ignore: 'pid,hostname',
-      messageFormat: options.debug ? '[{level}] {msg}' : '{msg}'
+      messageFormat: options.debug ? '[{level}] {msg}' : '{msg}',
+      destination: process.stderr
     }
   }
 });
@@ -137,6 +138,8 @@ async function main() {
 }
 
 main().catch((error) => {
-  console.error('Unhandled startup error:', error);
+  // Create a minimal stderr logger for critical startup errors
+  const stderrLogger = pino({ transport: { target: 'pino-pretty', options: { destination: process.stderr } } });
+  stderrLogger.fatal({ error }, 'Unhandled startup error');
   process.exit(1);
 });

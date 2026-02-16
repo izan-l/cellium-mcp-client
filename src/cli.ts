@@ -30,17 +30,11 @@ if (options.debug) {
 
 const logger = pino({
   level: logLevel,
-  transport: {
-    target: 'pino-pretty',
-    options: {
-      colorize: true,
-      translateTime: 'HH:MM:ss.l',
-      ignore: 'pid,hostname',
-      messageFormat: options.debug ? '[{level}] {msg}' : '{msg}',
-      destination: process.stderr
-    }
-  }
-});
+  formatters: {
+    level: (label) => ({ level: label })
+  },
+  timestamp: pino.stdTimeFunctions.isoTime
+}, process.stderr); // Pass stderr as second parameter
 
 async function main() {
   try {
@@ -139,7 +133,7 @@ async function main() {
 
 main().catch((error) => {
   // Create a minimal stderr logger for critical startup errors
-  const stderrLogger = pino({ transport: { target: 'pino-pretty', options: { destination: process.stderr } } });
+  const stderrLogger = pino({}, process.stderr);
   stderrLogger.fatal({ error }, 'Unhandled startup error');
   process.exit(1);
 });
